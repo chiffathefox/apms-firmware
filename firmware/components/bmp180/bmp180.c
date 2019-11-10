@@ -97,7 +97,14 @@ static TickType_t         bmp180_oss_conv_ticks[4] = {
 };
 
 
-/* TODO: add a semaphore for I2C. */
+/* 
+ * TODO: add a mutex for I2C (create a library that handles common i2c usage
+ *       patterns).\
+ * TODO: library currently supports a single bmp180 sensors. Make a device
+ *       handle structure to support more.
+ * TODO: make this library thread-safe.
+ * TODO: this library should be in a separate repository.
+ */
 
 
 /**
@@ -518,7 +525,7 @@ bmp180_read_status(void)
 
 
 /**
- * BMP180 task used to handle the trigger queue.
+ * BMP180 task that handles update from the trigger queue.
  *
  * @param params Parameters passed to `xTaskCreate'. Always `NULL'.
  */
@@ -529,6 +536,9 @@ bmp180_task(void *p)
     struct bmp180_trig_conv    *params;
 
     for (;;) {
+
+        /* TODO: drop the queue, use task notifications. */
+
         xQueueReceive(bmp180_trigq, &params, portMAX_DELAY);
 
         params->update.upd.status = bmp180_conv(&params->update.temp,
@@ -538,6 +548,14 @@ bmp180_task(void *p)
     }
 }
 
+
+/**
+ * Fill an update structure with data from a successful conversion.
+ *
+ * @param update Structure to fill.
+ * @param temp Temperature.
+ * @param pressure Pressure.
+ */
 
 static inline void
 bmp180_fill_update_success(struct itc_sensor_update_tap *update,
@@ -549,6 +567,12 @@ bmp180_fill_update_success(struct itc_sensor_update_tap *update,
     update->pressure = pressure;
 }
 
+
+/**
+ * Fill an update structure with data from a failed conversion.
+ *
+ * @param update Structure to fill.
+ */
 
 static inline void
 bmp180_fill_update_fail(struct itc_sensor_update_tap *update)
