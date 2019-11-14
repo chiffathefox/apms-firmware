@@ -11,7 +11,7 @@
 
 enum itc_sensor_type {
     ITC_SENSOR_TYPE_TAP = 0,  /* Temperature (0.1*C) and pressure (Pa). */
-    ITC_SENSOR_TYPE_TAH       /* Temperature (0.1*C) ad humidity. */
+    ITC_SENSOR_TYPE_TAH       /* Temperature (0.1*C) and humidity (0.1%). */
 };
 
 struct itc_sensor_update {
@@ -21,13 +21,13 @@ struct itc_sensor_update {
 
 struct itc_sensor_update_tap {
     struct itc_sensor_update     upd;
-    long                         temp;
+    int                          temp;
     long                         pressure;
 };
 
 struct itc_sensor_update_tah {
     struct itc_sensor_update     upd;
-    long                         temp;
+    int                          temp;
     int                          humidity;
 };
 
