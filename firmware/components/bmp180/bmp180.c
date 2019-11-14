@@ -10,8 +10,10 @@
 
 #include <driver/i2c.h>
 
-#include "bmp180.h"
 #include "ticks.h"
+#include "itc_sensor.h"
+
+#include "bmp180.h"
 
 
 #define BMP180_ADDR            0xEE
@@ -63,11 +65,11 @@ static esp_err_t bmp180_read(uint8_t addr, void *data, size_t len);
 static uint16_t bmp180_read_u16(uint8_t addr, esp_err_t *err);
 static esp_err_t bmp180_write(void *data, size_t len);
 static esp_err_t bmp180_fetch_calib_data(void);
-static esp_err_t bmp180_conv(long *temp, long *pressure, enum bmp180_oss oss);
+static esp_err_t bmp180_conv(int *temp, long *pressure, enum bmp180_oss oss);
 static esp_err_t bmp180_read_status(void);
 static void bmp180_task(void *params);
 static inline void bmp180_fill_update_success(
-        struct itc_sensor_update_tap *update, long temp, long pressure);
+        struct itc_sensor_update_tap *update, int temp, long pressure);
 static inline void bmp180_fill_update_fail(
         struct itc_sensor_update_tap *update);
 
@@ -123,6 +125,7 @@ static TickType_t         bmp180_oss_conv_ticks[4] = {
 esp_err_t
 bmp180_init(i2c_port_t port, QueueHandle_t updates)
 {
+    BaseType_t        rc;
     esp_err_t         err;
     unsigned char     chip_id;
 
@@ -170,9 +173,10 @@ bmp180_init(i2c_port_t port, QueueHandle_t updates)
 
     /* Start a new task. */
 
-    if (xTaskCreate(&bmp180_task, "bmp180", 1000, NULL, 
-                ITC_SENSOR_TASK_PRIO, NULL) != pdPASS) {
+    rc = xTaskCreate(&bmp180_task, "bmp180", 1000, NULL, ITC_SENSOR_TASK_PRIO,
+            NULL);
 
+    if (rc != pdPASS) {
         ESP_LOGW(TAG, "xTaskCreate failed");
 
         /* 
@@ -378,7 +382,7 @@ bmp180_fetch_calib_data(void)
  */
 
 static esp_err_t
-bmp180_conv(long *temp, long *pressure, enum bmp180_oss oss)
+bmp180_conv(int *temp, long *pressure, enum bmp180_oss oss)
 {
     uint8_t           temp_cmd[2] = { BMP180_CR_ADDR, BMP180_CR_TEMP },
                       pressure_cmd[2] = {
@@ -534,16 +538,17 @@ static void
 bmp180_task(void *p)
 {
     struct bmp180_trig_conv    *params;
+    int                         temp;
+    long                        pressure;
 
     for (;;) {
-
-        /* TODO: drop the queue, use task notifications. */
-
         xQueueReceive(bmp180_trigq, &params, portMAX_DELAY);
 
-        params->update.upd.status = bmp180_conv(&params->update.temp,
-                &params->update.pressure, params->oss);
+        /* TODO: critical section */
 
+        params->update.upd.status = bmp180_conv(&temp, &pressure, params->oss);
+
+        bmp180_fill_update_success(&params->update, temp, pressure);
         itc_sensor_send(bmp180_updatesq, &params->update);
     }
 }
@@ -559,7 +564,7 @@ bmp180_task(void *p)
 
 static inline void
 bmp180_fill_update_success(struct itc_sensor_update_tap *update,
-        long temp, long pressure)
+        int temp, long pressure)
 {
     update->upd.status = ESP_OK;
     update->upd.type = ITC_SENSOR_TYPE_TAP;
