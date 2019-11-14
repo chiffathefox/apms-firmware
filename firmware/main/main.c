@@ -12,7 +12,9 @@
 
 #include <driver/i2c.h>
 
+#include "dht.h"
 #include "bmp180.h"
+#include "ticks.h"
 #include "itc_sensor.h"
 
 
@@ -30,7 +32,8 @@ static QueueHandle_t     app_sensors_updates;
 void
 app_main()
 {
-    esp_err_t     err;
+    esp_err_t      err;
+    struct dht     dht;
 
     ESP_LOGI(TAG, "Starting up ...");
 
@@ -56,21 +59,67 @@ app_main()
         ESP_LOGW(TAG, "app_i2c_master_init failed (%d)", err);
     }
 
+    err = dht_init(&dht, GPIO_NUM_16, DHT_TYPE_AM23xx);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "dhd_init failed (%d)", err);
+    }
+
     for (;;) {
-        struct bmp180_trig_conv params;
+        vTaskDelay(TICKS_FROM_MS(5000));
+        struct bmp180_trig_conv bmp180_params;
         struct itc_sensor_update *update;
-        params.oss = BMP180_OSS_1;
+        bmp180_params.oss = BMP180_OSS_1;
 
-        bmp180_trig_conv(&params);
+        bmp180_trig_conv(&bmp180_params);
 
-        xQueueReceive(app_sensors_updates, &update, portMAX_DELAY);
+        struct dht_trig_conv dht_params;
+        dht_params.keep_alive = TICKS_FROM_MS(10000);
+        dht_params.updatesq = app_sensors_updates;
+        assert(dht_trig_conv(&dht, &dht_params, 0) == pdTRUE);
 
-        ESP_LOGI(TAG, "status=%d, type=%d", update->status, update->type);
+        for (int i = 0; i < 2; i++) {
+            xQueueReceive(app_sensors_updates, &update, portMAX_DELAY);
 
-        if (update->status == ESP_OK) {
-            ESP_LOGI(TAG, "temp=%ld, pressure=%ld", params.update.temp,
-                    params.update.pressure);
+            if (update->status != ESP_OK) {
+                ESP_LOGW("TAG", "sensor %d update failed (%d)",
+                        update->type, update->status);
+
+                continue;
+            }
+
+            switch (update->type) {
+
+
+            case ITC_SENSOR_TYPE_TAP:
+
+                ESP_LOGI(TAG, "bmp180: temp=%d, pressure=%ld",
+                        bmp180_params.update.temp, 
+                        bmp180_params.update.pressure);
+
+                break;
+
+
+            case ITC_SENSOR_TYPE_TAH:
+
+                ESP_LOGI(TAG, "dht: temp=%d, humidity=%d",
+                        dht_params.update.temp, dht_params.update.humidity);
+
+                break;
+
+
+            default:
+
+                ESP_LOGW(TAG, "received an unknown update type (%d)",
+                        update->type);
+
+                break;
+
+
+            }
         }
+
+        assert(xQueueReceive(app_sensors_updates, &update, 0) == pdFALSE);
     }
 }
 
@@ -93,9 +142,9 @@ app_i2c_master_init(i2c_port_t port)
     i2c_config_t     conf;
 
     conf.mode = I2C_MODE_MASTER;
-    conf.sda_io_num = 4;
+    conf.sda_io_num = GPIO_NUM_4;
     conf.sda_pullup_en = 0;
-    conf.scl_io_num = 5;
+    conf.scl_io_num = GPIO_NUM_5;
     conf.scl_pullup_en = 0;
     conf.clk_stretch_tick = 300;
 
