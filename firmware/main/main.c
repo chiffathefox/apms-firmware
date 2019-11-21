@@ -13,6 +13,7 @@
 #include <driver/i2c.h>
 
 #include "dht.h"
+#include "pms.h"
 #include "bmp180.h"
 #include "ticks.h"
 #include "itc_sensor.h"
@@ -34,6 +35,7 @@ app_main()
 {
     esp_err_t      err;
     struct dht     dht;
+    struct pms     pms;
 
     ESP_LOGI(TAG, "Starting up ...");
 
@@ -62,11 +64,19 @@ app_main()
     err = dht_init(&dht, GPIO_NUM_16, DHT_TYPE_AM23xx);
 
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "dhd_init failed (%d)", err);
+        ESP_LOGW(TAG, "dht_init failed (%d)", err);
     }
 
+    err = pms_init(&pms, UART_NUM_0, PMS_MODEL_70, PMS_MDPD_03, PMS_CNVMODE_LP);
+
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "pms_init failed (%d)", err);
+    }
+
+    ESP_LOGI(TAG, "init ok");
+
     for (;;) {
-        vTaskDelay(TICKS_FROM_MS(5000));
+        vTaskDelay(TICKS_FROM_MS(30000));
         struct bmp180_trig_conv bmp180_params;
         struct itc_sensor_update *update;
         bmp180_params.oss = BMP180_OSS_1;
@@ -74,15 +84,20 @@ app_main()
         bmp180_trig_conv(&bmp180_params);
 
         struct dht_trig_conv dht_params;
-        dht_params.keep_alive = TICKS_FROM_MS(10000);
+        dht_params.keep_alive = 0;
         dht_params.updatesq = app_sensors_updates;
         assert(dht_trig_conv(&dht, &dht_params, 0) == pdTRUE);
 
-        for (int i = 0; i < 2; i++) {
+        struct pms_trig_conv pms_params;
+        pms_params.keep_alive = 0;
+        pms_params.updatesq = app_sensors_updates;
+        assert(pms_trig_conv(&pms, &pms_params, 0) == pdTRUE);
+
+        for (int i = 0; i < 3; i++) {
             xQueueReceive(app_sensors_updates, &update, portMAX_DELAY);
 
             if (update->status != ESP_OK) {
-                ESP_LOGW("TAG", "sensor %d update failed (%d)",
+                ESP_LOGW(TAG, "sensor %d update failed (%d)",
                         update->type, update->status);
 
                 continue;
@@ -104,6 +119,15 @@ app_main()
 
                 ESP_LOGI(TAG, "dht: temp=%d, humidity=%d",
                         dht_params.update.temp, dht_params.update.humidity);
+
+                break;
+
+
+            case ITC_SENSOR_TYPE_PM:
+
+                ESP_LOGI(TAG, "pm: PM1.0 %d, PM2.5 %d, PM10 %d ug/m^3",
+                        pms_params.update.pm1d0, pms_params.update.pm2d5,
+                        pms_params.update.pm10d);
 
                 break;
 
