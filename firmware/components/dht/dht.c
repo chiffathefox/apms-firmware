@@ -259,12 +259,12 @@ dht_send_start(gpio_num_t pin)
 {
 
     /* 
-     * The line has an external pullup. That is why we use the open-darin mode.
+     * The line has an external pullup. That is why we use the open-drain mode.
      */
     
     assert(gpio_set_direction(pin, GPIO_MODE_OUTPUT_OD) == ESP_OK);
     assert(gpio_set_level(pin, 0) == ESP_OK);
-    vTaskDelay(TICKS_FROM_MS(DHT_START_TIME));
+    ets_delay_us(DHT_START_TIME * 1000);
     assert(gpio_set_direction(pin, GPIO_MODE_INPUT) == ESP_OK);
 }
 
@@ -328,9 +328,8 @@ dht_conv(struct dht *dht, int *temp, int *humidity)
 
     assert(dht->type == DHT_TYPE_AM23xx);
 
-    dht_send_start(dht->pin);
-
     taskENTER_CRITICAL();
+    dht_send_start(dht->pin);
     err = dht_read(dht->pin, data);
     taskEXIT_CRITICAL();
 
