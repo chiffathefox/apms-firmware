@@ -68,6 +68,36 @@ struct pms_trig_conv {
 
 
 /**
+ * @brief Determines whether set conditions are safe for the sensor operation.
+ *
+ * @param pms Device handle.
+ * @param temp Temperature (0.1*C).
+ * @param humidity Humidity (0.1%).
+ *
+ * @return 1 if safe, 0 otherwise.
+ */
+
+static inline int
+pms_is_safe(struct pms *pms, int temp, int humidity)
+{
+    switch (pms->model) {
+
+
+    case PMS_MODEL_70:
+
+        return temp > -90 && temp < 570 && humidity < 940;
+
+
+    default:
+
+        assert(0);
+
+
+    }
+}
+
+
+/**
  * @brief Initialize a PMS sensor.
  *
  * For each sensor a new task and a trigger queue is created. Which makes

@@ -19,25 +19,45 @@
 #include "itc_sensor.h"
 
 
-#define APP_I2C_PORT       I2C_NUM_0
-#define APP_SENSORS_COUNT  3
+#define APP_I2C_PORT          I2C_NUM_0
+#define APP_SENSORS_COUNT     3
+
+/* For code sanity checks only. */
+
+#define APP_QUEUE_WDT_TICKS  TICKS_FROM_MS(300000)
+
+
+struct app_data {
+    int       temp;         /* The most accurate available temperature. */
+    int       temp_coarse;
+    long      pressure;
+    int       humidity;
+    short     pm1d0;
+    short     pm2d5;
+    short     pm10d;
+};
 
 
 static esp_err_t app_i2c_master_init(i2c_port_t port);
+static inline void app_try(const char *name, esp_err_t err);
+static void app_main_task(void *param);
+static inline void app_data_init(struct app_data *data);
+static void app_pop_update(struct app_data *data);
 
 
 static const char       *TAG = "main";
 static QueueHandle_t     app_sensors_updates;
+struct dht               dht;
+struct pms               pms;
 
 
 void
 app_main()
 {
     esp_err_t      err;
-    struct dht     dht;
-    struct pms     pms;
+    BaseType_t     rc;
 
-    ESP_LOGI(TAG, "Starting up ...");
+    ESP_LOGI(TAG, "Init stage");
 
     app_sensors_updates = xQueueCreate(APP_SENSORS_COUNT,
             sizeof (struct itc_sensor_update *));
@@ -61,90 +81,16 @@ app_main()
         ESP_LOGW(TAG, "app_i2c_master_init failed (%d)", err);
     }
 
-    err = dht_init(&dht, GPIO_NUM_16, DHT_TYPE_AM23xx);
+    app_try("dht_init", dht_init(&dht, GPIO_NUM_16, DHT_TYPE_AM23xx));
+    app_try("pms_init", pms_init(&pms, UART_NUM_0, PMS_MODEL_70, PMS_MDPD_03,
+                PMS_CNVMODE_LP));
 
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "dht_init failed (%d)", err);
-    }
+    rc = xTaskCreate(app_main_task, "app_main_task", 8000, NULL,
+            ITC_SENSOR_TASK_PRIO - 1, NULL);
 
-    err = pms_init(&pms, UART_NUM_0, PMS_MODEL_70, PMS_MDPD_03, PMS_CNVMODE_LP);
+    assert(rc == pdTRUE);
 
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "pms_init failed (%d)", err);
-    }
-
-    ESP_LOGI(TAG, "init ok");
-
-    for (;;) {
-        vTaskDelay(TICKS_FROM_MS(30000));
-        struct bmp180_trig_conv bmp180_params;
-        struct itc_sensor_update *update;
-        bmp180_params.oss = BMP180_OSS_1;
-
-        bmp180_trig_conv(&bmp180_params);
-
-        struct dht_trig_conv dht_params;
-        dht_params.keep_alive = 0;
-        dht_params.updatesq = app_sensors_updates;
-        assert(dht_trig_conv(&dht, &dht_params, 0) == pdTRUE);
-
-        struct pms_trig_conv pms_params;
-        pms_params.keep_alive = 0;
-        pms_params.updatesq = app_sensors_updates;
-        assert(pms_trig_conv(&pms, &pms_params, 0) == pdTRUE);
-
-        for (int i = 0; i < 3; i++) {
-            xQueueReceive(app_sensors_updates, &update, portMAX_DELAY);
-
-            if (update->status != ESP_OK) {
-                ESP_LOGW(TAG, "sensor %d update failed (%d)",
-                        update->type, update->status);
-
-                continue;
-            }
-
-            switch (update->type) {
-
-
-            case ITC_SENSOR_TYPE_TAP:
-
-                ESP_LOGI(TAG, "bmp180: temp=%d, pressure=%ld",
-                        bmp180_params.update.temp, 
-                        bmp180_params.update.pressure);
-
-                break;
-
-
-            case ITC_SENSOR_TYPE_TAH:
-
-                ESP_LOGI(TAG, "dht: temp=%d, humidity=%d",
-                        dht_params.update.temp, dht_params.update.humidity);
-
-                break;
-
-
-            case ITC_SENSOR_TYPE_PM:
-
-                ESP_LOGI(TAG, "pm: PM1.0 %d, PM2.5 %d, PM10 %d ug/m^3",
-                        pms_params.update.pm1d0, pms_params.update.pm2d5,
-                        pms_params.update.pm10d);
-
-                break;
-
-
-            default:
-
-                ESP_LOGW(TAG, "received an unknown update type (%d)",
-                        update->type);
-
-                break;
-
-
-            }
-        }
-
-        assert(xQueueReceive(app_sensors_updates, &update, 0) == pdFALSE);
-    }
+    ESP_LOGI(TAG, "Init stage finished");
 }
 
 
@@ -183,4 +129,146 @@ app_i2c_master_init(i2c_port_t port)
     err = i2c_param_config(port, &conf);
 
     return err;
+}
+
+
+static inline void
+app_try(const char *name, esp_err_t err)
+{
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "%s() failed (%d)", name, err);
+    }
+}
+
+
+static void
+app_main_task(void *param)
+{
+    struct app_data              data;
+    struct dht_trig_conv         dht_params;
+    struct pms_trig_conv         pms_params;
+    struct bmp180_trig_conv      bmp180_params;
+
+    bmp180_params.oss = BMP180_OSS_1;
+
+    dht_params.keep_alive = 0;
+    dht_params.updatesq = app_sensors_updates;
+
+    pms_params.keep_alive = 0;
+    pms_params.updatesq = app_sensors_updates;
+
+    for (;;) {
+        vTaskDelay(TICKS_FROM_MS(30000));
+
+        bmp180_trig_conv(&bmp180_params);
+        assert(dht_trig_conv(&dht, &dht_params, 0) == pdTRUE);
+
+        app_data_init(&data);
+
+        for (int i = 0; i < 2; i++) {
+            app_pop_update(&data);
+        }
+
+        if (data.temp == ITC_SENSOR_INVPRESSURE) {
+            data.temp = data.temp_coarse;
+
+            ESP_LOGW(TAG, "accurate temperature is not available");
+        }
+
+        /*
+         * If `data.temp' == ITC_SENSOR_INVTEMP,
+         * then this fuction returns false.
+         */
+
+        if (pms_is_safe(&pms, data.temp, data.humidity)) {
+            assert(pms_trig_conv(&pms, &pms_params, 0) == pdTRUE);
+            app_pop_update(&data);
+        } else {
+            ESP_LOGW(TAG, "operating conditions are not safe for the PMS");
+        }
+
+        assert(xQueueReceive(app_sensors_updates, NULL, 0) == pdFALSE);
+    }
+}
+
+
+static inline void
+app_data_init(struct app_data *data)
+{
+    data->temp = ITC_SENSOR_INVTEMP;
+    data->temp_coarse = ITC_SENSOR_INVTEMP;
+    data->pressure = ITC_SENSOR_INVPRESSURE;
+    data->humidity = ITC_SENSOR_INVHUMIDITY;
+    data->pm1d0 = data->pm2d5 = data->pm10d = ITC_SENSOR_INVPM;
+}
+
+
+static void
+app_pop_update(struct app_data *data)
+{
+    struct itc_sensor_update        *update;
+    struct itc_sensor_update_tah    *tah;
+    struct itc_sensor_update_tap    *tap;
+    struct itc_sensor_update_pm     *pm;
+
+    assert(xQueueReceive(app_sensors_updates, &update,
+                APP_QUEUE_WDT_TICKS) == pdTRUE);
+
+    if (update->status != ESP_OK) {
+        ESP_LOGW(TAG, "sensor %d update failed (%d)",
+                update->type, update->status);
+
+        return;
+    }
+
+    switch (update->type) {
+
+
+    case ITC_SENSOR_TYPE_TAP:
+
+        tap = itc_sensor_update_tap(update);
+        data->temp_coarse = tap->temp;
+        data->pressure = tap->pressure;
+
+        ESP_LOGI(TAG, "bmp180: temp=%d, pressure=%ld",
+                tap->temp, tap->pressure);
+
+        break;
+
+
+    case ITC_SENSOR_TYPE_TAH:
+
+        tah = itc_sensor_update_tah(update);
+        data->temp = tah->temp;
+        data->humidity = tah->humidity;
+
+        ESP_LOGI(TAG, "dht: temp=%d, humidity=%d", tah->temp, tah->humidity); 
+
+        break;
+
+
+    case ITC_SENSOR_TYPE_PM:
+
+        pm = itc_sensor_update_pm(update);
+        data->pm1d0 = pm->pm1d0;
+        data->pm2d5 = pm->pm2d5;
+        data->pm10d = pm->pm10d;
+
+        ESP_LOGI(TAG, "pm: PM1.0 %d, PM2.5 %d, PM10 %d ug/m^3",
+                pm->pm1d0, pm->pm2d5, pm->pm10d);
+
+        break;
+
+
+    default:
+
+        ESP_LOGE(TAG, "received an unknown update type (%d)",
+                update->type);
+
+        assert(0);
+
+        break;
+
+
+    }
 }

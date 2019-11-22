@@ -9,6 +9,12 @@
 #include <esp_err.h>
 
 
+#define ITC_SENSOR_INVTEMP      (-0xFFFF)
+#define ITC_SENSOR_INVPRESSURE  (-0xFFFFFFFF)
+#define ITC_SENSOR_INVHUMIDITY  (-1)
+#define ITC_SENSOR_INVPM        (-1)
+
+
 enum itc_sensor_type {
     ITC_SENSOR_TYPE_TAP = 0,  /* Temperature (0.1*C) and pressure (Pa). */
     ITC_SENSOR_TYPE_TAH,      /* Temperature (0.1*C) and humidity (0.1%). */
