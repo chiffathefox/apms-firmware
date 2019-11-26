@@ -27,6 +27,26 @@
 #define APP_QUEUE_WDT_TICKS  TICKS_FROM_MS(300000)
 
 
+#define APP_FAST_MODE        1
+
+
+#if (APP_FAST_MODE)
+
+
+#    define APP_PMS_CNVMODE  PMS_CNVMODE_FAST
+#    define APP_MEAS_PERIOD  0
+
+
+#else
+
+
+#    define APP_PMS_CNVMODE  PMS_CNVMODE_LP
+#    define APP_MEAS_PERIOD  30000
+
+
+#endif
+
+
 struct app_data {
     int       temp;         /* The most accurate available temperature. */
     int       temp_coarse;
@@ -83,7 +103,7 @@ app_main()
 
     app_try("dht_init", dht_init(&dht, GPIO_NUM_16, DHT_TYPE_AM23xx));
     app_try("pms_init", pms_init(&pms, UART_NUM_0, PMS_MODEL_70, PMS_MDPD_03,
-                PMS_CNVMODE_LP));
+                APP_PMS_CNVMODE));
 
     rc = xTaskCreate(app_main_task, "app_main_task", 8000, NULL,
             ITC_SENSOR_TASK_PRIO - 1, NULL);
@@ -158,7 +178,7 @@ app_main_task(void *param)
     pms_params.updatesq = app_sensors_updates;
 
     for (;;) {
-        vTaskDelay(TICKS_FROM_MS(30000));
+        vTaskDelay(TICKS_FROM_MS(APP_MEAS_PERIOD));
 
         bmp180_trig_conv(&bmp180_params);
         assert(dht_trig_conv(&dht, &dht_params, 0) == pdTRUE);
