@@ -28,8 +28,7 @@ enum pms_mdpd {
     PMS_MDPD_03 = 0,  /* 0.3 um */
     PMS_MDPD_05,      /* 0.5 um */
     PMS_MDPD_10,      /* 1.0 um */
-    PMS_MDPD_25,      /* 2.5 um */
-    PMS_MDPD_MAX
+    PMS_MDPD_25       /* 2.5 um */
 };
 
 enum pms_cnvmode {
@@ -44,8 +43,7 @@ enum pms_cnvmode {
      * (up to 2 * PMS_SPINUP_TICKS).
      */
 
-    PMS_CNVMODE_LP,
-    PMS_CNVMODE_MAX
+    PMS_CNVMODE_LP
 };
 
 struct pms {
@@ -56,7 +54,6 @@ struct pms {
 
     QueueHandle_t        trigq;
     TaskHandle_t         task;
-    TickType_t           last_chpwr;
 };
 
 struct pms_trig_conv {

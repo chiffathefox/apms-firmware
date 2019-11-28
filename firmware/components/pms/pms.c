@@ -34,12 +34,13 @@ enum pms_pwr_mode {
 };
 
 
-#define PMS_RSP_PACKET_LEN  32
-#define PMS_RSP_BUF_LEN     1024
-#define PMS_TRIGQ_LEN       5
-#define PMS_MAX_CONV_TICKS  TICKS_FROM_MS(2500)
-#define PMS_SPINUP_TICKS    TICKS_FROM_MS(40000)
-#define PMS_STARTUP_TICKS   TICKS_FROM_MS(2500)
+#define PMS_RSP_PACKET_LEN      32
+#define PMS_RSP_PACKET_BUF_LEN  (PMS_RSP_PACKET_LEN * 2)
+#define PMS_RSP_BUF_LEN         256
+#define PMS_TRIGQ_LEN           5
+#define PMS_MAX_CONV_TICKS      TICKS_FROM_MS(2415)
+#define PMS_SPINUP_TICKS        TICKS_FROM_MS(31500)
+#define PMS_STARTUP_TICKS       TICKS_FROM_MS(500)
 
 
 static const char    *TAG = "pms";
@@ -47,6 +48,7 @@ static const char    *TAG = "pms";
 
 static void pms_cmd_send(struct pms *pms, enum pms_cmd cmd,
         unsigned char datah, unsigned char datal);
+static inline void pms_cmd_read(struct pms *pms);
 static inline void pms_cmd_chmod(struct pms *pms, enum pms_mode mode);
 static inline void pms_cmd_chpwr(struct pms *pms, enum pms_pwr_mode pwr_mode);
 static inline void pms_fill_update_fail(struct itc_sensor_update_pm *update);
@@ -65,17 +67,15 @@ pms_init(struct pms *pms, uart_port_t port, enum pms_model model,
 {
     uart_config_t     uart_config;
     BaseType_t        rc;
+    TickType_t        startup_ticks;
 
     assert(model == PMS_MODEL_70);
-    assert(mdpd < PMS_MDPD_MAX);
-    assert(cnvmode < PMS_CNVMODE_MAX);
 
     pms->port = port;
     pms->model = model;
     pms->mdpd = mdpd;
     pms->cnvmode = cnvmode;
     pms->task = NULL;
-    pms->last_chpwr = 1;
 
     uart_config.baud_rate = 9600;
     uart_config.data_bits = UART_DATA_8_BITS;
@@ -86,12 +86,29 @@ pms_init(struct pms *pms, uart_port_t port, enum pms_model model,
     assert(uart_param_config(port, &uart_config) == ESP_OK);
     assert(uart_driver_install(port, PMS_RSP_BUF_LEN, 0, 0, NULL, 0) == ESP_OK);
 
-    vTaskDelay(PMS_STARTUP_TICKS);
+    startup_ticks = PMS_STARTUP_TICKS;
+
+    switch (cnvmode) {
+
+
+    case PMS_CNVMODE_FAST:
+
+        startup_ticks += PMS_SPINUP_TICKS;
+
+        break;
+
+
+    case PMS_CNVMODE_LP:
+
+        break;
+
+
+    }
+
+    vTaskDelay(startup_ticks);
 
     if (cnvmode == PMS_CNVMODE_LP) {
         pms_cmd_chpwr(pms, PMS_PWR_MODE_SLEEP);
-    } else {
-        vTaskDelay(PMS_SPINUP_TICKS);
     }
 
     pms->trigq = xQueueCreate(PMS_TRIGQ_LEN, sizeof (struct pms_trig_conv *));
@@ -163,6 +180,7 @@ pms_cmd_send(struct pms *pms, enum pms_cmd cmd,
     buf[6] = checksum & 0xFF;
 
     assert(uart_write_bytes(pms->port, buf, sizeof (buf)) == sizeof (buf));
+    assert(uart_wait_tx_done(pms->port, PMS_MAX_CONV_TICKS) == ESP_OK);
 }
 
 
@@ -208,11 +226,6 @@ pms_cmd_chmod(struct pms *pms, enum pms_mode mode)
 static inline void
 pms_cmd_chpwr(struct pms *pms, enum pms_pwr_mode pwr_mode)
 {
-
-    /* Strange undocumented sensor behaviour. */
-
-    vTaskDelayUntil(&pms->last_chpwr, PMS_SPINUP_TICKS);
-
     pms_cmd_send(pms, PMS_CMD_SLEEP, 0, pwr_mode);
 }
 
@@ -284,9 +297,10 @@ pms_task(void *param)
 static esp_err_t
 pms_conv(struct pms *pms, struct itc_sensor_update_pm *update)
 {
-    int               n, i;
+    int               n, i, left;
     short             frame_length, checksum, computed_checksum;
-    unsigned char     packet[PMS_RSP_PACKET_LEN];
+    unsigned char     buf[PMS_RSP_PACKET_BUF_LEN], *packet, *end;
+    TickType_t        tick;
 
     if (pms->cnvmode == PMS_CNVMODE_LP) {
         pms_cmd_chpwr(pms, PMS_PWR_MODE_AWAKE);
@@ -295,27 +309,48 @@ pms_conv(struct pms *pms, struct itc_sensor_update_pm *update)
 
     assert(uart_flush(pms->port) == ESP_OK);
 
-    n = uart_read_bytes(pms->port, packet, PMS_RSP_PACKET_LEN,
-            PMS_MAX_CONV_TICKS);
+    tick = xTaskGetTickCount();
+    n = uart_read_bytes(pms->port, buf, PMS_RSP_PACKET_LEN, PMS_MAX_CONV_TICKS);
+    ESP_LOGD(TAG, "uart_read_bytes: read %d bytes, took %lu ms", 
+            n, (xTaskGetTickCount() - tick) * portTICK_RATE_MS);
 
     if (pms->cnvmode == PMS_CNVMODE_LP) {
         pms_cmd_chpwr(pms, PMS_PWR_MODE_SLEEP);
     }
 
     if (n != PMS_RSP_PACKET_LEN) {
-        ESP_LOGW(TAG, "uart_read_bytes failed: read %d, expected %d",
-                n, PMS_RSP_PACKET_LEN);
+        ESP_LOGW(TAG, "uart_read_bytes failed: read %d", n);
 
         return ESP_FAIL;
     }
 
     /* Parse the received packet. */
 
-    if (packet[0] != 0x42 || packet[1] != 0x4D) {
-        ESP_LOGW(TAG, "unexpected magic bytes (%02X%02X)",
-                packet[0], packet[1]);
+    end = buf + n - 1;
+
+    for (packet = buf; packet < end; packet++) {
+        if (packet[0] == 0x42 && packet[1] == 0x4D) {
+            break;
+        }
+    }
+
+    if (end == packet) {
+        ESP_LOGW(TAG, "no magic bytes were found");
 
         return ESP_FAIL;
+    }
+
+    end++;
+    left = PMS_RSP_PACKET_LEN - (intptr_t) (end - packet);
+
+    if (left > 0) {
+        n = uart_read_bytes(pms->port, end, left, PMS_MAX_CONV_TICKS);
+
+        if (n != left) {
+            ESP_LOGW(TAG, "uart_read_bytes filed: read %d expected %d", n, left);
+
+            return ESP_FAIL;
+        }
     }
 
     checksum = bytes_be_to_u16(packet + 30);
