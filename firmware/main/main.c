@@ -27,7 +27,7 @@
 #define APP_QUEUE_WDT_TICKS  TICKS_FROM_MS(300000)
 
 
-#define APP_FAST_MODE        1
+#define APP_FAST_MODE        0
 
 
 #if (APP_FAST_MODE)
@@ -58,17 +58,30 @@ struct app_data {
 };
 
 
+#define app_data_log(data, fn)                                                  \
+    fn(TAG, "data: temp %d 0.1*C; temp_coarse %d 0.1*C; "                       \
+            "pressure %ld Pa; humidity %d 0.1%%RH; "                            \
+            "PM1.0 %d ug/m^3; PM2.5 %d ug/m^3; PM10 %d ug/m^3",                 \
+            (data)->temp, (data)->temp_coarse, (data)->pressure,                \
+            (data)->humidity, (data)->pm1d0, (data)->pm2d5, (data)->pm10d);
+
+
 static esp_err_t app_i2c_master_init(i2c_port_t port);
 static inline void app_try(const char *name, esp_err_t err);
 static void app_main_task(void *param);
 static inline void app_data_init(struct app_data *data);
+static inline int app_data_is_ok(struct app_data *data);
 static void app_pop_update(struct app_data *data);
+static void app_conv_weather_data(struct app_data *data);
 
 
-static const char       *TAG = "main";
-static QueueHandle_t     app_sensors_updates;
-struct dht               dht;
-struct pms               pms;
+static const char           *TAG = "main";
+static QueueHandle_t         app_sensors_updates;
+struct dht                   app_dht;
+struct pms                   app_pms;
+struct dht_trig_conv         app_dht_params;
+struct pms_trig_conv         app_pms_params;
+struct bmp180_trig_conv      app_bmp180_params;
 
 
 void
@@ -101,9 +114,19 @@ app_main()
         ESP_LOGW(TAG, "app_i2c_master_init failed (%d)", err);
     }
 
-    app_try("dht_init", dht_init(&dht, GPIO_NUM_16, DHT_TYPE_AM23xx));
-    app_try("pms_init", pms_init(&pms, UART_NUM_0, PMS_MODEL_70, PMS_MDPD_03,
+    app_try("dht_init", dht_init(&app_dht, GPIO_NUM_16, DHT_TYPE_AM23xx));
+    app_try("pms_init", pms_init(&app_pms, UART_NUM_0, PMS_MODEL_70, PMS_MDPD_03,
                 APP_PMS_CNVMODE));
+
+    /* Initizalize trigger structures. */
+
+    app_bmp180_params.oss = BMP180_OSS_1;
+
+    app_dht_params.keep_alive = 0;
+    app_dht_params.updatesq = app_sensors_updates;
+
+    app_pms_params.keep_alive = 0;
+    app_pms_params.updatesq = app_sensors_updates;
 
     rc = xTaskCreate(app_main_task, "app_main_task", 8000, NULL,
             ITC_SENSOR_TASK_PRIO - 1, NULL);
@@ -165,49 +188,36 @@ static void
 app_main_task(void *param)
 {
     struct app_data              data;
-    struct dht_trig_conv         dht_params;
-    struct pms_trig_conv         pms_params;
-    struct bmp180_trig_conv      bmp180_params;
-
-    bmp180_params.oss = BMP180_OSS_1;
-
-    dht_params.keep_alive = 0;
-    dht_params.updatesq = app_sensors_updates;
-
-    pms_params.keep_alive = 0;
-    pms_params.updatesq = app_sensors_updates;
+    struct itc_sensor_update    *update;
 
     for (;;) {
         vTaskDelay(TICKS_FROM_MS(APP_MEAS_PERIOD));
 
-        bmp180_trig_conv(&bmp180_params);
-        assert(dht_trig_conv(&dht, &dht_params, 0) == pdTRUE);
-
-        app_data_init(&data);
-
-        for (int i = 0; i < 2; i++) {
-            app_pop_update(&data);
-        }
-
-        if (data.temp == ITC_SENSOR_INVPRESSURE) {
-            data.temp = data.temp_coarse;
-
-            ESP_LOGW(TAG, "accurate temperature is not available");
-        }
+        app_conv_weather_data(&data);
 
         /*
          * If `data.temp' == ITC_SENSOR_INVTEMP,
          * then this fuction returns false.
          */
 
-        if (pms_is_safe(&pms, data.temp, data.humidity)) {
-            assert(pms_trig_conv(&pms, &pms_params, 0) == pdTRUE);
+        if (pms_is_safe(&app_pms, data.temp, data.humidity)) {
+            assert(pms_trig_conv(&app_pms, &app_pms_params, 0) == pdTRUE);
+            assert(xQueuePeek(app_sensors_updates, &update,
+                        APP_QUEUE_WDT_TICKS) == pdTRUE);
+
+            app_conv_weather_data(&data);
             app_pop_update(&data);
         } else {
             ESP_LOGW(TAG, "operating conditions are not safe for the PMS");
         }
 
-        assert(xQueueReceive(app_sensors_updates, NULL, 0) == pdFALSE);
+        if (app_data_is_ok(&data)) {
+            app_data_log(&data, ESP_LOGI);
+        } else {
+            app_data_log(&data, ESP_LOGW);
+        }
+
+        assert(xQueueReceive(app_sensors_updates, &update, 0) == pdFALSE);
     }
 }
 
@@ -220,6 +230,19 @@ app_data_init(struct app_data *data)
     data->pressure = ITC_SENSOR_INVPRESSURE;
     data->humidity = ITC_SENSOR_INVHUMIDITY;
     data->pm1d0 = data->pm2d5 = data->pm10d = ITC_SENSOR_INVPM;
+}
+
+
+static inline int
+app_data_is_ok(struct app_data *data)
+{
+    return data->temp != ITC_SENSOR_INVTEMP &&
+        data->temp_coarse != ITC_SENSOR_INVTEMP &&
+        data->pressure != ITC_SENSOR_INVPRESSURE &&
+        data->humidity != ITC_SENSOR_INVHUMIDITY &&
+        data->pm1d0 != ITC_SENSOR_INVPM &&
+        data->pm2d5 != ITC_SENSOR_INVPM &&
+        data->pm10d != ITC_SENSOR_INVPM;
 }
 
 
@@ -250,9 +273,6 @@ app_pop_update(struct app_data *data)
         data->temp_coarse = tap->temp;
         data->pressure = tap->pressure;
 
-        ESP_LOGI(TAG, "bmp180: temp=%d, pressure=%ld",
-                tap->temp, tap->pressure);
-
         break;
 
 
@@ -261,8 +281,6 @@ app_pop_update(struct app_data *data)
         tah = itc_sensor_update_tah(update);
         data->temp = tah->temp;
         data->humidity = tah->humidity;
-
-        ESP_LOGI(TAG, "dht: temp=%d, humidity=%d", tah->temp, tah->humidity); 
 
         break;
 
@@ -273,9 +291,6 @@ app_pop_update(struct app_data *data)
         data->pm1d0 = pm->pm1d0;
         data->pm2d5 = pm->pm2d5;
         data->pm10d = pm->pm10d;
-
-        ESP_LOGI(TAG, "pm: PM1.0 %d, PM2.5 %d, PM10 %d ug/m^3",
-                pm->pm1d0, pm->pm2d5, pm->pm10d);
 
         break;
 
@@ -292,3 +307,24 @@ app_pop_update(struct app_data *data)
 
     }
 }
+
+
+static void
+app_conv_weather_data(struct app_data *data)
+{
+    bmp180_trig_conv(&app_bmp180_params);
+    assert(dht_trig_conv(&app_dht, &app_dht_params, 0) == pdTRUE);
+
+    app_data_init(data);
+
+    for (int i = 0; i < 2; i++) {
+        app_pop_update(data);
+    }
+
+    if (data->temp == ITC_SENSOR_INVPRESSURE) {
+        data->temp = data->temp_coarse;
+
+        ESP_LOGW(TAG, "accurate temperature was replaced with a coarse one");
+    }
+}
+
