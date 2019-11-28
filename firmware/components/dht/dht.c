@@ -17,11 +17,12 @@
 #include "dht.h"
 
 
-#define DHT_TRIGQ_LENGTH    5
-#define DHT_START_TIME      18   /* ms */
-#define DHT_BLOCK_INTERVAL  2    /* us */
-#define DHT_DATA_BITS       40
-#define DHT_DATA_BYTES      (DHT_DATA_BITS / 8)
+#define DHT_TRIGQ_LENGTH           5
+#define DHT_START_TIME             18   /* ms */
+#define DHT_BLOCK_INTERVAL         2    /* us */
+#define DHT_DATA_BITS              40
+#define DHT_DATA_BYTES             (DHT_DATA_BITS / 8)
+#define DHT_MIN_CONV_PERIOD_TICKS  TICKS_FROM_MS(2100)
 
 
 #define DHT_CHECK_LOGW(x, ...)                                                 \
@@ -61,6 +62,7 @@ dht_init(struct dht *dht, gpio_num_t pin, enum dht_type type)
     dht->pin = pin;
     dht->type = type;
     dht->task = NULL;
+    dht->last_conv = xTaskGetTickCount();
 
     conf.pin_bit_mask = BIT(pin);
     conf.mode = GPIO_MODE_INPUT;
@@ -327,6 +329,8 @@ dht_conv(struct dht *dht, int *temp, int *humidity)
     unsigned char     data[DHT_DATA_BYTES], checksum;
 
     assert(dht->type == DHT_TYPE_AM23xx);
+
+    ticks_delay_until(&dht->last_conv, DHT_MIN_CONV_PERIOD_TICKS);
 
     taskENTER_CRITICAL();
     dht_send_start(dht->pin);

@@ -22,6 +22,7 @@ struct dht {
 
     QueueHandle_t                    trigq;
     TaskHandle_t                     task;
+    TickType_t                       last_conv;
 };
 
 struct dht_trig_conv {
