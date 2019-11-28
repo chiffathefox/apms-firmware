@@ -75,22 +75,19 @@ struct pms_trig_conv {
  */
 
 static inline int
-pms_is_safe(struct pms *pms, int temp, int humidity)
+pms_is_safe(struct pms *pms, int temp, int humidity, short pm10d)
 {
     switch (pms->model) {
 
 
     case PMS_MODEL_70:
 
-        return temp > -90 && temp < 570 && humidity < 940;
-
-
-    default:
-
-        assert(0);
+        return temp > -90 && temp < 570 && humidity < 940 && pm10d < 300;
 
 
     }
+
+    assert(0);
 }
 
 

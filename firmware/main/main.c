@@ -34,14 +34,14 @@
 
 
 #    define APP_PMS_CNVMODE  PMS_CNVMODE_FAST
-#    define APP_MEAS_PERIOD  0
+#    define APP_MEAS_DELAY   0
 
 
 #else
 
 
 #    define APP_PMS_CNVMODE  PMS_CNVMODE_LP
-#    define APP_MEAS_PERIOD  30000
+#    define APP_MEAS_DELAY   30000
 
 
 #endif
@@ -55,6 +55,12 @@ struct app_data {
     short     pm1d0;
     short     pm2d5;
     short     pm10d;
+};
+
+
+struct app_conf {
+    TickType_t     pms_safety_delay;
+    TickType_t     meas_delay;
 };
 
 
@@ -73,6 +79,7 @@ static inline void app_data_init(struct app_data *data);
 static inline int app_data_is_ok(struct app_data *data);
 static void app_pop_update(struct app_data *data);
 static void app_conv_weather_data(struct app_data *data);
+static void app_conf_load(struct app_conf *conf);
 
 
 static const char           *TAG = "main";
@@ -82,6 +89,7 @@ struct pms                   app_pms;
 struct dht_trig_conv         app_dht_params;
 struct pms_trig_conv         app_pms_params;
 struct bmp180_trig_conv      app_bmp180_params;
+struct app_conf              app_conf;
 
 
 void
@@ -127,6 +135,8 @@ app_main()
 
     app_pms_params.keep_alive = 0;
     app_pms_params.updatesq = app_sensors_updates;
+
+    app_conf_load(&app_conf);
 
     rc = xTaskCreate(app_main_task, "app_main_task", 8000, NULL,
             ITC_SENSOR_TASK_PRIO - 1, NULL);
@@ -187,11 +197,16 @@ app_try(const char *name, esp_err_t err)
 static void
 app_main_task(void *param)
 {
+    TickType_t                   delay;
     struct app_data              data;
     struct itc_sensor_update    *update;
 
+    delay = app_conf.meas_delay;
+
     for (;;) {
-        vTaskDelay(TICKS_FROM_MS(APP_MEAS_PERIOD));
+        vTaskDelay(TICKS_FROM_MS(delay));
+
+        delay = app_conf.meas_delay;
 
         app_conv_weather_data(&data);
 
@@ -200,7 +215,7 @@ app_main_task(void *param)
          * then this fuction returns false.
          */
 
-        if (pms_is_safe(&app_pms, data.temp, data.humidity)) {
+        if (pms_is_safe(&app_pms, data.temp, data.humidity, data.pm10d)) {
             assert(pms_trig_conv(&app_pms, &app_pms_params, 0) == pdTRUE);
             assert(xQueuePeek(app_sensors_updates, &update,
                         APP_QUEUE_WDT_TICKS) == pdTRUE);
@@ -209,6 +224,8 @@ app_main_task(void *param)
             app_pop_update(&data);
         } else {
             ESP_LOGW(TAG, "operating conditions are not safe for the PMS");
+
+            delay += app_conf.pms_safety_delay;
         }
 
         if (app_data_is_ok(&data)) {
@@ -328,3 +345,10 @@ app_conv_weather_data(struct app_data *data)
     }
 }
 
+
+static void
+app_conf_load(struct app_conf *conf)
+{
+    conf->pms_safety_delay = TICKS_FROM_MS(60000);
+    conf->meas_delay = TICKS_FROM_MS(APP_MEAS_DELAY);
+}
