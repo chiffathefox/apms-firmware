@@ -61,6 +61,7 @@ struct app_data {
 struct app_conf {
     TickType_t     pms_safety_delay;
     TickType_t     meas_delay;
+    TickType_t     max_meas_delay;
 };
 
 
@@ -197,6 +198,7 @@ app_try(const char *name, esp_err_t err)
 static void
 app_main_task(void *param)
 {
+    int                          rc;
     TickType_t                   delay;
     struct app_data              data;
     struct itc_sensor_update    *update;
@@ -204,9 +206,7 @@ app_main_task(void *param)
     delay = app_conf.meas_delay;
 
     for (;;) {
-        vTaskDelay(TICKS_FROM_MS(delay));
-
-        delay = app_conf.meas_delay;
+        ESP_LOGD(TAG, "triggerring conversions ...");
 
         app_conv_weather_data(&data);
 
@@ -215,7 +215,11 @@ app_main_task(void *param)
          * then this fuction returns false.
          */
 
-        if (pms_is_safe(&app_pms, data.temp, data.humidity, data.pm10d)) {
+        /* TODO: take a look at oss */
+
+        rc = pms_is_safe(&app_pms, data.temp, data.humidity, 0);
+
+        if (rc) {
             assert(pms_trig_conv(&app_pms, &app_pms_params, 0) == pdTRUE);
             assert(xQueuePeek(app_sensors_updates, &update,
                         APP_QUEUE_WDT_TICKS) == pdTRUE);
@@ -225,16 +229,36 @@ app_main_task(void *param)
         } else {
             ESP_LOGW(TAG, "operating conditions are not safe for the PMS");
 
-            delay += app_conf.pms_safety_delay;
+            if (data.temp != ITC_SENSOR_INVTEMP && 
+                    data.humidity != ITC_SENSOR_INVHUMIDITY) {
+
+                /* 
+                 * Increase the delay only if the values were
+                 * actually measured.
+                 */
+
+                delay += app_conf.pms_safety_delay;
+            }
         }
 
         if (app_data_is_ok(&data)) {
             app_data_log(&data, ESP_LOGI);
+
+            rc = pms_is_safe(&app_pms, data.temp, data.humidity, data.pm10d);
+            delay = rc ? 
+                app_conf.meas_delay : 
+                delay + app_conf.pms_safety_delay;
         } else {
             app_data_log(&data, ESP_LOGW);
         }
 
         assert(xQueueReceive(app_sensors_updates, &update, 0) == pdFALSE);
+
+        if (delay > app_conf.max_meas_delay) {
+            delay = app_conf.max_meas_delay;
+        }
+
+        vTaskDelay(delay);
     }
 }
 
@@ -351,4 +375,5 @@ app_conf_load(struct app_conf *conf)
 {
     conf->pms_safety_delay = TICKS_FROM_MS(60000);
     conf->meas_delay = TICKS_FROM_MS(APP_MEAS_DELAY);
+    conf->max_meas_delay = conf->meas_delay * 5;
 }
