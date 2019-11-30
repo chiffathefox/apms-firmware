@@ -82,7 +82,9 @@ pms_is_safe(struct pms *pms, int temp, int humidity, short pm10d)
 
     case PMS_MODEL_70:
 
-        return temp > -90 && temp < 570 && humidity < 940 && pm10d < 300;
+        return temp > -90 && temp < 570 && 
+            humidity >= 0 && humidity < 940 && 
+            pm10d >= 0 && pm10d < 300;
 
 
     }
