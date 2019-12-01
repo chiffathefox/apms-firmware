@@ -1,0 +1,14 @@
+
+menu "Application Configuration"
+
+
+config APP_FAST_MODE
+    bool "Use fast conversion mode"
+    default n
+    help
+        Use fast conversion and no measurement delay. This is for debug purposes
+        only.
+
+
+endmenu
+
