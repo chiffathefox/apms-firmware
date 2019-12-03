@@ -390,7 +390,7 @@ app_conv_task(void *param)
          *       Make a public function to put pms into sleep.
          */
 
-        /* TODO: rtc. */
+        /* TODO: redundant AP that can be fetched from shadow file. */
 
         rc = pms_is_safe(&app_pms, data.temp, data.humidity, 0);
         cnvmode = pms_cnvmode(&app_pms);
@@ -789,7 +789,6 @@ app_aws_iot_task(void *param)
     IoT_Error_t                    rc;
     IoT_Publish_Message_Params     msg_params;
 
-    mdbg_info();
     app_aws_iot_init();
 
     n_pending = 0;
@@ -850,7 +849,6 @@ app_aws_iot_task(void *param)
             continue;
         }
 
-        mdbg_info();
         msg_params.payload = app_json_from_samples();
         msg_params.payloadLen = strlen(msg_params.payload);
 
@@ -860,12 +858,12 @@ app_aws_iot_task(void *param)
         rc = aws_iot_mqtt_publish(&app_client,
                 APP_MQTT_TOPIC, APP_MQTT_TOPIC_LENGTH, &msg_params);
 
-        mdbg_info();
         cJSON_free(msg_params.payload);
 
-        mdbg_info();
         if (rc != SUCCESS) {
             ESP_LOGE(TAG, "aws_iot_mqtt_public failed (%d)", rc);
+        } else {
+            ESP_LOGD(TAG, "published!");
         }
     }
 }
@@ -934,7 +932,7 @@ app_json_from_samples(void)
 
     str = cJSON_PrintBuffered(json, buflen, cJSON_False);
 
-    cJSON_free(json);
+    cJSON_Delete(json);
 
     return str;
 }
