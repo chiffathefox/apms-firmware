@@ -40,12 +40,11 @@
 /* For code sanity checks only.        */
 
 #define APP_QUEUE_WDT_TICKS           TICKS_FROM_MS(300000)
-#define APP_MIN_MEAS_DELAY            2000                   /* ms */
+#define APP_MIN_CONV_PERIOD           2000                   /* ms */
 
-#define APP_FAST_MODE                 CONFIG_APP_FAST_MODE
-#define APP_DEFAULT_MEAS_DELAY        CONFIG_APP_DEFAULT_MEAS_DELAY
+#define APP_DEFAULT_CONV_PERIOD       CONFIG_APP_DEFAULT_CONV_PERIOD
 #define APP_DEFAULT_PMS_SAFETY_DELAY  CONFIG_APP_DEFAULT_PMS_SAFETY_DELAY
-#define APP_DEFAULT_MAX_MEAS_DELAY    CONFIG_APP_DEFAULT_MAX_MEAS_DELAY
+#define APP_DEFAULT_MAX_CONV_DELAY    CONFIG_APP_DEFAULT_MAX_CONV_DELAY
 #define APP_DEFAULT_WIFI_SSID         CONFIG_APP_DEFAULT_WIFI_SSID
 #define APP_DEFAULT_WIFI_PWD          CONFIG_APP_DEFAULT_WIFI_PWD
 #define APP_DEFAULT_PUBLISH_COUNT     CONFIG_APP_PUBLISH_COUNT
@@ -54,11 +53,22 @@
 #define APP_TLS_HANDSHAKE_TIMEOUT     CONFIG_APP_TLS_HANDSHAKE_TIMEOUT
 #define APP_MQTT_CLIENT_ID            CONFIG_APP_MQTT_CLIENT_ID
 #define APP_MQTT_KEEP_ALIVE           CONFIG_APP_MQTT_KEEP_ALIVE
+#define APP_MQTT_MIN_YIELD_TIMEOUT    CONFIG_APP_MQTT_MIN_YIELD_TIMEOUT
+#define APP_MQTT_MAX_YIELD_TIMEOUT    CONFIG_APP_MQTT_MAX_YIELD_TIMEOUT
 #define APP_PUBLISH_COUNT             CONFIG_APP_PUBLISH_COUNT
 #define APP_SAMPLESQ_LENGTH           CONFIG_APP_SAMPLESQ_LENGTH
 
 
-#if (APP_SAMPLESQ_LENGTH < APP_MQTT_COMMAND_TIMEOUT * 2 / APP_MIN_MEAS_DELAY)
+#if (APP_DEFAULT_CONV_PERIOD < APP_MIN_CONV_PERIOD)
+
+
+#    error APP_DEFAULT_CONV_PERIOD must be >= then APP_MIN_CONV_PERIOD
+
+
+#endif
+
+
+#if (APP_SAMPLESQ_LENGTH < APP_MQTT_COMMAND_TIMEOUT * 2 / APP_MIN_CONV_PERIOD)
 
 
 #    error APP_SAMPLESQ_LENGTH is too small
@@ -67,25 +77,35 @@
 #endif
 
 
-#define APP_MQTT_TOPIC                ("sensors/" APP_MQTT_CLIENT_ID)
-#define APP_MQTT_TOPIC_LENGTH         (sizeof (APP_MQTT_TOPIC) - 1)
+#if (APP_MQTT_MIN_YIELD_TIMEOUT >= APP_MQTT_KEEP_ALIVE)
 
 
-#if (APP_FAST_MODE)
-
-
-#    define APP_PMS_CNVMODE           PMS_CNVMODE_FAST
-#    define APP_MEAS_DELAY            APP_MIN_MEAS_DELAY
-
-
-#else
-
-
-#    define APP_PMS_CNVMODE           PMS_CNVMODE_LP
-#    define APP_MEAS_DELAY            APP_DEFAULT_MEAS_DELAY
+#    error APP_MQTT_MIN_YIELD_TIMEOUT must be smaller than APP_MQTT_KEEP_ALIVE
 
 
 #endif
+
+
+#if (APP_MQTT_MAX_YIELD_TIMEOUT < APP_MQTT_MIN_YIELD_TIMEOUT)
+
+
+#    error APP_MQTT_MAX_YIELD_TIMEOUT must be greater APP_MQTT_MIN_YIELD_TIMEOUT
+
+
+#endif
+
+
+#if (APP_MQTT_MAX_YIELD_TIMEOUT > APP_MQTT_KEEP_ALIVE)
+
+
+#    error APP_MQTT_MAX_YIELD_TIMEOUT must be smaller than APP_MQTT_KEEP_ALIVE
+
+
+#endif
+
+
+#define APP_MQTT_TOPIC                ("sensors/" APP_MQTT_CLIENT_ID)
+#define APP_MQTT_TOPIC_LENGTH         (sizeof (APP_MQTT_TOPIC) - 1)
 
 
 #define APP_WIFI_EG_CONNECTED         BIT0
@@ -106,8 +126,8 @@ struct app_data {
 
 struct app_conf {
     TickType_t     pms_safety_delay;
-    TickType_t     meas_delay;
-    TickType_t     max_meas_delay;
+    TickType_t     max_conv_delay;
+    TickType_t     conv_period;
     const char    *wifi_ssid;
     const char    *wifi_pwd;
 };
@@ -186,8 +206,9 @@ extern const uint8_t         private_pem_key_start[]
 void
 app_main()
 {
-    esp_err_t      err;
-    BaseType_t     rc;
+    esp_err_t            err;
+    BaseType_t           rc;
+    enum pms_cnvmode     cnvmode;
 
     ESP_LOGI(TAG, "Init stage");
 
@@ -218,8 +239,17 @@ app_main()
     }
 
     app_try("dht_init", dht_init(&app_dht, GPIO_NUM_16, DHT_TYPE_AM23xx));
+    app_nvs_init();
+    app_conf_init(&app_conf);
+
+    cnvmode = app_conf.conv_period <= PMS_MAX_SEND_TICKS ?
+        PMS_CNVMODE_FAST : PMS_CNVMODE_LP;
+
+    ESP_LOGD(TAG, "conv_period = %lu, selecting cnvmode = %d",
+            app_conf.conv_period, cnvmode);
+
     app_try("pms_init", pms_init(&app_pms, UART_NUM_0, PMS_MODEL_70,
-                PMS_MDPD_03, APP_PMS_CNVMODE));
+                PMS_MDPD_03, cnvmode));
 
     /* Initizalize trigger structures. */
 
@@ -231,16 +261,18 @@ app_main()
     app_pms_params.keep_alive = 0;
     app_pms_params.updatesq = app_sensors_updates;
 
-    app_conf_init(&app_conf);
-    app_nvs_init();
     app_wifi_init();
 
-    rc = xTaskCreate(app_aws_iot_task, "app_aws_iot_task", 8000, NULL,
+    /* Used stack high watermark is 3748 bytes. */
+
+    rc = xTaskCreate(app_aws_iot_task, "app_aws_iot_task", 5000, NULL,
             APP_TASK_PRIO, NULL);
 
     assert(rc == pdTRUE);
 
-    rc = xTaskCreate(app_conv_task, "app_conv_task", 8000, NULL, APP_TASK_PRIO,
+    /* Used stack high watermark is 888 bytes. */
+
+    rc = xTaskCreate(app_conv_task, "app_conv_task", 2000, NULL, APP_TASK_PRIO,
             NULL);
 
     assert(rc == pdTRUE);
@@ -306,8 +338,8 @@ app_try(const char *name, esp_err_t err)
 /**
  * @brief Task that handles sensor conversions.
  *
- * Triggers sensors conversions with a set `app_conf.meas_delay' measurement
- * delay and collects the data into a queue for `app_aws_iot_task'
+ * Triggers sensors conversions with a set `app_conf.conv_period' measurement
+ * period and collects the data into a queue for `app_aws_iot_task'
  * to publish.
  *
  * @param param NULL.
@@ -317,15 +349,18 @@ static void
 app_conv_task(void *param)
 {
     int                          rc;
-    TickType_t                   delay, wakeup;
+    TickType_t                   delay, last_wakeup, qmaxwait, tick;
+    enum pms_cnvmode             cnvmode;
     struct app_data              data, data_lowr;
     struct itc_sensor_update    *update;
 
-    delay = app_conf.meas_delay;
+    delay = last_wakeup = 0;
 
     for (;;) {
-        ESP_LOGD(TAG, "triggerring conversions ...");
+        app_meminfo();
+        ticks_delay_until(&last_wakeup, app_conf.conv_period + delay);
 
+        ESP_LOGD(TAG, "triggerring conversions ...");
         app_conv_weather_data(&data);
 
         /*
@@ -338,9 +373,13 @@ app_conv_task(void *param)
         /* 
          * TODO: it should be possible for the pms component to change
          *       conversion mode on the fly.
+         *       Make a public function to put pms into sleep.
          */
 
+        /* TODO: rtc. */
+
         rc = pms_is_safe(&app_pms, data.temp, data.humidity, 0);
+        cnvmode = pms_cnvmode(&app_pms);
 
         if (rc) {
             assert(pms_trig_conv(&app_pms, &app_pms_params, 0) == pdTRUE);
@@ -368,22 +407,43 @@ app_conv_task(void *param)
             app_data_log(&data, ESP_LOGI);
 
             rc = pms_is_safe(&app_pms, data.temp, data.humidity, data.pm10d);
-            delay = rc ? 
-                app_conf.meas_delay : 
-                delay + app_conf.pms_safety_delay;
+            delay = rc ? 0 : delay + app_conf.pms_safety_delay;
         } else {
             app_data_log(&data, ESP_LOGW);
         }
 
-        assert(xQueueReceive(app_sensors_updates, &update, 0) == pdFALSE);
+        if (!rc) {
+            switch (cnvmode) {
 
-        if (delay > app_conf.max_meas_delay) {
-            delay = app_conf.max_meas_delay;
+
+            case PMS_CNVMODE_FAST:
+
+                /* TODO: put pms to sleep. */
+
+                break;
+
+
+            case PMS_CNVMODE_LP:
+
+                /* The sensor is already asleep. */
+
+                break;
+
+
+            }
         }
 
-        wakeup = xTaskGetTickCount();
+        assert(xQueueReceive(app_sensors_updates, &update, 0) == pdFALSE);
 
-        if (xQueueSendToBack(app_samplesq, &data, delay) == pdFALSE) {
+        if (delay > app_conf.max_conv_delay) {
+            delay = app_conf.max_conv_delay;
+        }
+
+        qmaxwait = last_wakeup + app_conf.conv_period + delay;
+        tick = xTaskGetTickCount();
+        qmaxwait = qmaxwait > tick ? qmaxwait - tick : 0;
+
+        if (xQueueSendToBack(app_samplesq, &data, qmaxwait) == pdFALSE) {
             ESP_LOGW(TAG, "samples queue is full, overwriting old samples");
 
             taskENTER_CRITICAL();
@@ -395,8 +455,6 @@ app_conv_task(void *param)
 
             taskEXIT_CRITICAL();
         }
-
-        vTaskDelayUntil(&wakeup, delay);
     }
 }
 
@@ -516,8 +574,8 @@ app_conf_init(struct app_conf *conf)
     /* TODO: load configuration from the shadow file. */
 
     conf->pms_safety_delay = TICKS_FROM_MS(APP_DEFAULT_PMS_SAFETY_DELAY);
-    conf->meas_delay = TICKS_FROM_MS(APP_MEAS_DELAY);
-    conf->max_meas_delay = TICKS_FROM_MS(APP_DEFAULT_MAX_MEAS_DELAY);
+    conf->max_conv_delay = TICKS_FROM_MS(APP_DEFAULT_MAX_CONV_DELAY);
+    conf->conv_period = TICKS_FROM_MS(APP_DEFAULT_CONV_PERIOD);
     conf->wifi_ssid = APP_DEFAULT_WIFI_SSID;
     conf->wifi_pwd = APP_DEFAULT_WIFI_PWD;
 }
@@ -711,12 +769,15 @@ app_aws_iot_init(void)
 static void
 app_aws_iot_task(void *param)
 {
-    int                            n;
+    int                            n_pending;
+    uint32_t                       yield_timeout;
     IoT_Error_t                    rc;
     IoT_Publish_Message_Params     msg_params;
 
     app_meminfo();
     app_aws_iot_init();
+
+    n_pending = 0;
 
     /* QoS0 guarantees at most once delivery. */
 
@@ -726,8 +787,26 @@ app_aws_iot_task(void *param)
 
     for (;;) {
         app_meminfo();
-        /* TODO: compute yield block time dyamically. */
-        rc = aws_iot_mqtt_yield(&app_client, 10000);
+
+        n_pending = uxQueueMessagesWaiting(app_samplesq);
+
+        if (n_pending >= APP_PUBLISH_COUNT) {
+            yield_timeout = APP_MQTT_MIN_YIELD_TIMEOUT;
+        } else {
+            yield_timeout = (APP_PUBLISH_COUNT - n_pending) * 
+                ticks_to_ms(app_conf.conv_period);
+
+            if (yield_timeout < APP_MQTT_MIN_YIELD_TIMEOUT) {
+                yield_timeout = APP_MQTT_MIN_YIELD_TIMEOUT;
+            } else if (yield_timeout > APP_MQTT_MAX_YIELD_TIMEOUT) {
+                yield_timeout = APP_MQTT_MAX_YIELD_TIMEOUT;
+            }
+        }
+
+        ESP_LOGD(TAG, "n_pending = %d / %d, selecting yield_timeout = %d ms",
+                n_pending, APP_PUBLISH_COUNT, yield_timeout);
+
+        rc = aws_iot_mqtt_yield(&app_client, yield_timeout);
 
         if (rc == NETWORK_ATTEMPTING_RECONNECT) {
 
@@ -741,12 +820,12 @@ app_aws_iot_task(void *param)
             continue;
         }
 
-        n = uxQueueMessagesWaiting(app_samplesq);
+        n_pending = uxQueueMessagesWaiting(app_samplesq);
 
-        ESP_LOGD(TAG, "samplesq cur/pub/max: %d / %d / %d",
-                n, APP_PUBLISH_COUNT, APP_SAMPLESQ_LENGTH);
+        ESP_LOGD(TAG, "samplesq pending messages cur/pub/max: %d / %d / %d",
+                n_pending, APP_PUBLISH_COUNT, APP_SAMPLESQ_LENGTH);
 
-        if (n < APP_PUBLISH_COUNT) {
+        if (n_pending < APP_PUBLISH_COUNT) {
 
             /* 
              * Sending data in bulk reduces the number of sent MQTT messages,
@@ -760,7 +839,8 @@ app_aws_iot_task(void *param)
         msg_params.payload = app_json_from_samples();
         msg_params.payloadLen = strlen(msg_params.payload);
 
-        ESP_LOGD(TAG, "payloadLen = %d", msg_params.payloadLen);
+        ESP_LOGI(TAG, "publish to %s: payloadLen = %d",
+                APP_MQTT_TOPIC, msg_params.payloadLen);
 
         rc = aws_iot_mqtt_publish(&app_client,
                 APP_MQTT_TOPIC, APP_MQTT_TOPIC_LENGTH, &msg_params);

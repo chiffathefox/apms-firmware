@@ -38,8 +38,6 @@ enum pms_pwr_mode {
 #define PMS_RSP_PACKET_BUF_LEN  (PMS_RSP_PACKET_LEN * 2)
 #define PMS_RSP_BUF_LEN         256
 #define PMS_TRIGQ_LEN           5
-#define PMS_MAX_CONV_TICKS      TICKS_FROM_MS(2415)
-#define PMS_SPINUP_TICKS        TICKS_FROM_MS(31500)
 #define PMS_STARTUP_TICKS       TICKS_FROM_MS(500)
 
 

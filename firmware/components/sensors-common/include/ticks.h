@@ -11,6 +11,9 @@
                               (ms) / portTICK_RATE_MS + 1)
 
 
+#define ticks_to_ms(tick)   (tick * portTICK_RATE_MS)
+
+
 /**
  * @brief Delay until `*last_wakeup + period' and fill `last_wakeup' with
  *        current ticks count value.

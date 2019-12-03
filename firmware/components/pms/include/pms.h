@@ -64,6 +64,27 @@ struct pms_trig_conv {
 };
 
 
+#define PMS_MAX_CONV_TICKS      TICKS_FROM_MS(2415)
+#define PMS_SPINUP_TICKS        TICKS_FROM_MS(31500)
+
+/* 
+ * Maximum time it would take the component to push a conversion result
+ * into updates queue.
+ */
+
+#define PMS_MAX_SEND_TICKS      (PMS_SPINUP_TICKS + PMS_MAX_CONV_TICKS * 3)
+
+
+/**
+ * @brief Return the selected conversion mode.
+ *
+ * @param pms Device handle.
+ * @return enum pms_cnvmode Selected conversion mode.
+ */
+
+#define pms_cnvmode(pms)  ((pms)->cnvmode)
+
+
 /**
  * @brief Determines whether set conditions are safe for the sensor operation.
  *
