@@ -35,6 +35,7 @@
 #include "bmp180.h"
 #include "ticks.h"
 #include "itc_sensor.h"
+#include "mdbg.h"
 
 
 #define APP_I2C_PORT                  I2C_NUM_0
@@ -163,10 +164,6 @@ struct app_conf {
     cJSON_AddItemToArray(var, num);
 
 
-#define app_meminfo()                                                          \
-    app_meminfo_fn(__LINE__);
-
-
 #define app_wait_for_wifi()                                                    \
     xEventGroupWaitBits(app_wifi_eg, APP_WIFI_EG_CONNECTED, false, true,       \
             portMAX_DELAY);
@@ -188,7 +185,6 @@ static inline void app_aws_iot_init(void);
 static void app_aws_iot_task(void *param);
 static void app_aws_iot_disconnect_handler(AWS_IoT_Client *client, void *data);
 static char *app_json_from_samples(void);
-static inline void app_meminfo_fn(int line);
 static inline void app_sntp_init(void);
 
 
@@ -276,7 +272,7 @@ app_main()
 
     /* Used stack high watermark is 3748 bytes. */
 
-    rc = xTaskCreate(app_aws_iot_task, "app_aws_iot_task", 5000, NULL,
+    rc = xTaskCreate(app_aws_iot_task, "app_aws_iot_task", 4000, NULL,
             APP_TASK_PRIO, NULL);
 
     assert(rc == pdTRUE);
@@ -290,7 +286,7 @@ app_main()
 
     /* Used stack high watermark is 888 bytes. */
 
-    rc = xTaskCreate(app_conv_task, "app_conv_task", 2000, NULL, APP_TASK_PRIO,
+    rc = xTaskCreate(app_conv_task, "app_conv_task", 1110, NULL, APP_TASK_PRIO,
             NULL);
 
     assert(rc == pdTRUE);
@@ -375,7 +371,7 @@ app_conv_task(void *param)
     delay = last_wakeup = 0;
 
     for (;;) {
-        app_meminfo();
+        mdbg_info();
         ticks_delay_until(&last_wakeup, app_conf.conv_period + delay);
 
         ESP_LOGD(TAG, "triggerring conversions ...");
@@ -793,7 +789,7 @@ app_aws_iot_task(void *param)
     IoT_Error_t                    rc;
     IoT_Publish_Message_Params     msg_params;
 
-    app_meminfo();
+    mdbg_info();
     app_aws_iot_init();
 
     n_pending = 0;
@@ -805,7 +801,7 @@ app_aws_iot_task(void *param)
     msg_params.payload = NULL;
 
     for (;;) {
-        app_meminfo();
+        mdbg_info();
 
         n_pending = uxQueueMessagesWaiting(app_samplesq);
 
@@ -854,7 +850,7 @@ app_aws_iot_task(void *param)
             continue;
         }
 
-        app_meminfo();
+        mdbg_info();
         msg_params.payload = app_json_from_samples();
         msg_params.payloadLen = strlen(msg_params.payload);
 
@@ -864,10 +860,10 @@ app_aws_iot_task(void *param)
         rc = aws_iot_mqtt_publish(&app_client,
                 APP_MQTT_TOPIC, APP_MQTT_TOPIC_LENGTH, &msg_params);
 
-        app_meminfo();
+        mdbg_info();
         cJSON_free(msg_params.payload);
 
-        app_meminfo();
+        mdbg_info();
         if (rc != SUCCESS) {
             ESP_LOGE(TAG, "aws_iot_mqtt_public failed (%d)", rc);
         }
@@ -941,15 +937,6 @@ app_json_from_samples(void)
     cJSON_free(json);
 
     return str;
-}
-
-
-static inline void
-app_meminfo_fn(int line)
-{
-    ESP_LOGD(TAG, "meminfo for %s:%d: free heap %d, free stack %lu",
-            pcTaskGetTaskName(NULL), line, heap_caps_get_minimum_free_size(0),
-            uxTaskGetStackHighWaterMark(NULL));
 }
 
 

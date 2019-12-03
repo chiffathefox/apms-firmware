@@ -10,6 +10,7 @@
 
 #include <driver/uart.h>
 
+#include "mdbg.h"
 #include "ticks.h"
 #include "bytes.h"
 #include "itc_sensor.h"
@@ -117,7 +118,7 @@ pms_init(struct pms *pms, uart_port_t port, enum pms_model model,
         return ESP_FAIL;
     }
 
-    rc = xTaskCreate(pms_task, "pms", 2000, pms, ITC_SENSOR_TASK_PRIO,
+    rc = xTaskCreate(pms_task, "pms", 1300, pms, ITC_SENSOR_TASK_PRIO,
             &pms->task);
 
     if (rc != pdPASS) {
@@ -266,6 +267,7 @@ pms_task(void *param)
     last_update.upd.type = ITC_SENSOR_TYPE_PM;
 
     for (;;) {
+        mdbg_info();
         xQueueReceive(pms->trigq, &params, portMAX_DELAY);
 
         tick = xTaskGetTickCount();

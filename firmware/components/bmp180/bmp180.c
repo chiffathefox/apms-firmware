@@ -10,6 +10,7 @@
 
 #include <driver/i2c.h>
 
+#include "mdbg.h"
 #include "ticks.h"
 #include "itc_sensor.h"
 
@@ -542,6 +543,7 @@ bmp180_task(void *p)
     long                        pressure;
 
     for (;;) {
+        mdbg_info();
         xQueueReceive(bmp180_trigq, &params, portMAX_DELAY);
 
         /* TODO: critical section */

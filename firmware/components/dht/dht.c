@@ -10,6 +10,7 @@
 #include <rom/ets_sys.h>
 #include <driver/gpio.h>
 
+#include "mdbg.h"
 #include "ticks.h"
 #include "itc_sensor.h"
 #include "bytes.h"
@@ -159,6 +160,7 @@ dht_task(void *param)
     last_tick = xTaskGetTickCount();
 
     for (;;) {
+        mdbg_info();
         xQueueReceive(dht->trigq, &params, portMAX_DELAY);
 
         tick = xTaskGetTickCount();
