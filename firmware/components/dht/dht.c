@@ -70,7 +70,7 @@ dht_init(struct dht *dht, gpio_num_t pin, enum dht_type type)
     conf.pull_down_en = GPIO_PULLDOWN_DISABLE;
     conf.intr_type = GPIO_INTR_DISABLE;
 
-    assert(gpio_config(&conf) == ESP_OK);
+    ESP_ERROR_CHECK(gpio_config(&conf));
 
     /* Check if the pullup resistor was installed. */
 
@@ -264,10 +264,10 @@ dht_send_start(gpio_num_t pin)
      * The line has an external pullup. That is why we use the open-drain mode.
      */
     
-    assert(gpio_set_direction(pin, GPIO_MODE_OUTPUT_OD) == ESP_OK);
-    assert(gpio_set_level(pin, 0) == ESP_OK);
+    ESP_ERROR_CHECK(gpio_set_direction(pin, GPIO_MODE_OUTPUT_OD));
+    ESP_ERROR_CHECK(gpio_set_level(pin, 0) );
     ets_delay_us(DHT_START_TIME * 1000);
-    assert(gpio_set_direction(pin, GPIO_MODE_INPUT) == ESP_OK);
+    ESP_ERROR_CHECK(gpio_set_direction(pin, GPIO_MODE_INPUT));
 }
 
 

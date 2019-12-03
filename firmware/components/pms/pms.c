@@ -83,8 +83,8 @@ pms_init(struct pms *pms, uart_port_t port, enum pms_model model,
     uart_config.stop_bits = UART_STOP_BITS_1;
     uart_config.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
 
-    assert(uart_param_config(port, &uart_config) == ESP_OK);
-    assert(uart_driver_install(port, PMS_RSP_BUF_LEN, 0, 0, NULL, 0) == ESP_OK);
+    ESP_ERROR_CHECK(uart_param_config(port, &uart_config));
+    ESP_ERROR_CHECK(uart_driver_install(port, PMS_RSP_BUF_LEN, 0, 0, NULL, 0));
 
     startup_ticks = PMS_STARTUP_TICKS;
 
@@ -180,7 +180,7 @@ pms_cmd_send(struct pms *pms, enum pms_cmd cmd,
     buf[6] = checksum & 0xFF;
 
     assert(uart_write_bytes(pms->port, buf, sizeof (buf)) == sizeof (buf));
-    assert(uart_wait_tx_done(pms->port, PMS_MAX_CONV_TICKS) == ESP_OK);
+    ESP_ERROR_CHECK(uart_wait_tx_done(pms->port, PMS_MAX_CONV_TICKS));
 }
 
 
@@ -307,7 +307,7 @@ pms_conv(struct pms *pms, struct itc_sensor_update_pm *update)
         vTaskDelay(PMS_SPINUP_TICKS);
     }
 
-    assert(uart_flush(pms->port) == ESP_OK);
+    ESP_ERROR_CHECK(uart_flush(pms->port));
 
     tick = xTaskGetTickCount();
     n = uart_read_bytes(pms->port, buf, PMS_RSP_PACKET_LEN, PMS_MAX_CONV_TICKS);

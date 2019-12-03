@@ -89,7 +89,7 @@ pms_is_safe(struct pms *pms, int temp, int humidity, short pm10d)
 
     }
 
-    assert(0);
+    abort();
 }
 
 
