@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <time.h>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -24,6 +25,8 @@
 #include <aws_iot_mqtt_client_interface.h>
 
 #include <driver/i2c.h>
+
+#include <lwip/apps/sntp.h>
 
 #include <cJSON.h>
 
@@ -57,6 +60,7 @@
 #define APP_MQTT_MAX_YIELD_TIMEOUT    CONFIG_APP_MQTT_MAX_YIELD_TIMEOUT
 #define APP_PUBLISH_COUNT             CONFIG_APP_PUBLISH_COUNT
 #define APP_SAMPLESQ_LENGTH           CONFIG_APP_SAMPLESQ_LENGTH
+#define APP_NTP_SERVERNAME            CONFIG_APP_NTP_SERVERNAME
 
 
 #if (APP_DEFAULT_CONV_PERIOD < APP_MIN_CONV_PERIOD)
@@ -120,7 +124,7 @@ struct app_data {
     short        pm1d0;
     short        pm2d5;
     short        pm10d;
-    uint64_t     timestamp;   /* UNIX timestamp in seconds. */
+    time_t       timestamp;   /* UNIX timestamp in seconds. */
 };
 
 
@@ -136,9 +140,10 @@ struct app_conf {
 #define app_data_log(data, fn)                                                 \
     fn(TAG, "data: temp %d 0.1*C; temp_coarse %d 0.1*C; "                      \
             "pressure %ld Pa; humidity %d 0.1%%RH; "                           \
-            "PM1.0 %d ug/m^3; PM2.5 %d ug/m^3; PM10 %d ug/m^3",                \
+            "PM1.0 %d ug/m^3; PM2.5 %d ug/m^3; PM10 %d ug/m^3; @ %ld s",       \
             (data)->temp, (data)->temp_coarse, (data)->pressure,               \
-            (data)->humidity, (data)->pm1d0, (data)->pm2d5, (data)->pm10d);
+            (data)->humidity, (data)->pm1d0, (data)->pm2d5, (data)->pm10d,     \
+            (data)->timestamp);
 
 
 #define APP_JSON_ASSIGN(var, fn, ...)                                          \
@@ -162,6 +167,11 @@ struct app_conf {
     app_meminfo_fn(__LINE__);
 
 
+#define app_wait_for_wifi()                                                    \
+    xEventGroupWaitBits(app_wifi_eg, APP_WIFI_EG_CONNECTED, false, true,       \
+            portMAX_DELAY);
+
+
 static esp_err_t app_i2c_master_init(i2c_port_t port);
 static inline void app_try(const char *name, esp_err_t err);
 static void app_conv_task(void *param);
@@ -179,6 +189,7 @@ static void app_aws_iot_task(void *param);
 static void app_aws_iot_disconnect_handler(AWS_IoT_Client *client, void *data);
 static char *app_json_from_samples(void);
 static inline void app_meminfo_fn(int line);
+static inline void app_sntp_init(void);
 
 
 static const char                  *TAG = "main";
@@ -269,6 +280,13 @@ app_main()
             APP_TASK_PRIO, NULL);
 
     assert(rc == pdTRUE);
+
+    /* 
+     * Let the `app_aws_iot_task' do its job and fetch the 
+     * current time in the meanwhile.
+     */
+
+    app_sntp_init();
 
     /* Used stack high watermark is 888 bytes. */
 
@@ -402,6 +420,8 @@ app_conv_task(void *param)
                 delay += app_conf.pms_safety_delay;
             }
         }
+
+        data.timestamp = time(NULL);
 
         if (app_data_is_ok(&data)) {
             app_data_log(&data, ESP_LOGI);
@@ -741,8 +761,7 @@ app_aws_iot_init(void)
 
     connect_params.isWillMsgPresent = false;
 
-    xEventGroupWaitBits(app_wifi_eg, APP_WIFI_EG_CONNECTED, false, true,
-            portMAX_DELAY);
+    app_wait_for_wifi();
 
     do {
         ESP_LOGD(TAG, "trying to open a MQTT connection ...");
@@ -931,4 +950,37 @@ app_meminfo_fn(int line)
     ESP_LOGD(TAG, "meminfo for %s:%d: free heap %d, free stack %lu",
             pcTaskGetTaskName(NULL), line, heap_caps_get_minimum_free_size(0),
             uxTaskGetStackHighWaterMark(NULL));
+}
+
+
+static inline void
+app_sntp_init(void)
+{
+    time_t         timestamp;
+    TickType_t     tick;
+
+    app_wait_for_wifi();
+    sntp_setoperatingmode(SNTP_OPMODE_POLL);
+    sntp_setservername(0, APP_NTP_SERVERNAME);
+    sntp_init();
+
+    /* Wait for the time to get updated. */
+
+    tick = xTaskGetTickCount();
+
+    do {
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+        timestamp = time(NULL);
+    } while (timestamp < (2019 - 1970) * 86400);
+
+    /* 
+     * XXX: because `sizeof (time_t) == 4' 
+     *      this code will stop working in 2038.
+     */
+
+    tick = xTaskGetTickCount() - tick;
+
+    ESP_LOGI(TAG, "synced in %lu ms, time is %ld",
+            ticks_to_ms(tick), timestamp);
 }

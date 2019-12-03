@@ -117,6 +117,12 @@ config APP_SAMPLESQ_LENGTH
         another task to pop and send to the cloud. If the number of samples
         in the queue reached `APP_SAMPLESQ_LENGTH' then old samples will
         be overwritten by new ones.
+
+config APP_NTP_SERVERNAME
+    string "NTP server name"
+    default "pool.ntp.org"
+    help
+        Network Time Protocol servername to synchronize time with.
             
 endmenu
 
