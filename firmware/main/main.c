@@ -62,6 +62,11 @@
 #define APP_PUBLISH_COUNT             CONFIG_APP_PUBLISH_COUNT
 #define APP_SAMPLESQ_LENGTH           CONFIG_APP_SAMPLESQ_LENGTH
 #define APP_NTP_SERVERNAME            CONFIG_APP_NTP_SERVERNAME
+#define APP_MQTT_TOPIC                CONFIG_APP_MQTT_TOPIC
+#define APP_MQTT_TOPIC_LENGTH         (sizeof (APP_MQTT_TOPIC) - 1)
+#define APP_LATITUDE                  CONFIG_APP_LATITUDE
+#define APP_LONGITUDE                 CONFIG_APP_LONGITUDE
+
 
 
 #if (APP_DEFAULT_CONV_PERIOD < APP_MIN_CONV_PERIOD)
@@ -107,10 +112,6 @@
 
 
 #endif
-
-
-#define APP_MQTT_TOPIC                ("sensors/" APP_MQTT_CLIENT_ID)
-#define APP_MQTT_TOPIC_LENGTH         (sizeof (APP_MQTT_TOPIC) - 1)
 
 
 #define APP_WIFI_EG_CONNECTED         BIT0
@@ -890,10 +891,11 @@ app_json_from_samples(void)
     int                 buflen, n;
     char               *str;
     cJSON              *json, *temp, *temp_coarse, *pressure, *humidity,
-                       *pm1d0, *pm2d5, *pm10d, *timestamp, *num;
+                       *pm1d0, *pm2d5, *pm10d, *timestamp, *num, *tmp;
     struct app_data     data;
 
     APP_JSON_ASSIGN(json, cJSON_CreateObject);
+
     APP_JSON_ASSIGN_ATO(temp, json);
     APP_JSON_ASSIGN_ATO(temp_coarse, json);
     APP_JSON_ASSIGN_ATO(pressure, json);
@@ -902,6 +904,10 @@ app_json_from_samples(void)
     APP_JSON_ASSIGN_ATO(pm2d5, json);
     APP_JSON_ASSIGN_ATO(pm10d, json);
     APP_JSON_ASSIGN_ATO(timestamp, json);
+    APP_JSON_ASSIGN(tmp,
+            cJSON_AddStringToObject, json, "client_id", APP_MQTT_CLIENT_ID);
+    APP_JSON_ASSIGN(tmp, cJSON_AddNumberToObject, json, "lat", APP_LATITUDE);
+    APP_JSON_ASSIGN(tmp, cJSON_AddNumberToObject, json, "lng", APP_LONGITUDE);
 
     for (n = 0; xQueueReceive(app_samplesq, &data, 0) == pdTRUE; n++) {
         APP_JSON_APPEND_NUM(temp);

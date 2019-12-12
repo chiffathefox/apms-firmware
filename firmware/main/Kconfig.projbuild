@@ -64,6 +64,10 @@ config APP_MQTT_MAX_YIELD_TIMEOUT
         See APP_MQTT_MIN_YIELD_TIMEOUT.
         This value is in milliseconds.
 
+config APP_MQTT_TOPIC
+    string "AWS IoT MQTT topic"
+    default "sensors/samples"
+
 config APP_TLS_HANDSHAKE_TIMEOUT
     int "TLS handshake timoeut"
     default 5000
@@ -123,6 +127,14 @@ config APP_NTP_SERVERNAME
     default "pool.ntp.org"
     help
         Network Time Protocol servername to synchronize time with.
+
+config APP_LATITUDE
+    int "Sensor location: latitude"
+    default 51067838
+
+config APP_LONGITUDE
+    int "Sensor location: longitude"
+    default 4499943
             
 endmenu
 
