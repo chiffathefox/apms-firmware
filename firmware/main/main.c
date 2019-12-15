@@ -922,7 +922,8 @@ app_json_from_samples(void)
 
     buflen = sizeof ("{ \"temp\": [], \"temp_coarse\": [], \"pressure\": [], "
             "\"humidity\": [], \"pm1d0\": [], \"pm2d5\": [], \"pm10d\": [], "
-            "\"timestamp\": [] }") + (
+            "\"timestamp\": [], \"client_id\": \"apms-0000000000\", "
+            "\"lat\": , \"lng\":  }") + (
                 sizeof ("-32768, ") - 1 +
                 sizeof ("-32768, ") - 1 +
                 sizeof ("-2147483648, ") - 1 +
@@ -930,7 +931,9 @@ app_json_from_samples(void)
                 sizeof ("-32768, ") - 1 +
                 sizeof ("-32768, ") - 1 +
                 sizeof ("-32768, ") - 1 +
-                sizeof ("18446744073709551616, ") - 1
+                sizeof ("18446744073709551616, ") - 1 +
+                sizeof ("-2147483648, ") - 1 +
+                sizeof ("-2147483648, ") - 1
             ) * (n + 1);
 
     ESP_LOGD(TAG, "%s: preallocating %d bytes for %d samples",
