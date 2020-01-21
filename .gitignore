@@ -1,2 +1,4 @@
 build
 sdkconfig.old
+main/certs/certificate.pem.crt
+main/certs/private.pem.key
