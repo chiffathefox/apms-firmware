@@ -1,0 +1,140 @@
+
+menu "Application Configuration"
+
+config APP_DEFAULT_WIFI_SSID
+    string "Wi-Fi SSID"
+    default "iot"
+    help
+        SSID to fallback to when there are no others available.
+
+config APP_DEFAULT_WIFI_PWD
+    string "Wi-Fi Password"
+    default "1qazxcvb"
+    help
+        Password (WPA or WPA2) for the Wi-Fi to fallback to.
+
+config APP_MQTT_PACKET_TIMEOUT
+    int "MQTT packet timeout"
+    default 5000
+    range 0 60000
+    help
+        Timeout for reading a complete MQTT packet in milliseconds.
+
+config APP_MQTT_COMMAND_TIMEOUT
+    int "MQTT command timeout"
+    default 20000
+    range 0 60000
+    help
+        Timeout for MQTT blocking calls in milliseconds. 
+
+config APP_MQTT_CLIENT_ID
+    string "MQTT client ID"
+    default "apms"
+    help
+        MQTT client ID.
+        This needs to be unique per device across your AWS account.
+
+config APP_MQTT_KEEP_ALIVE
+    int "AWS IoT MQTT connection keep alive interval"
+    default 60000
+    range 0 65535000
+    help
+        MQTT keep alive interval in milliseconds.  Defines inactivity
+        time allowed before determining the connection has been lost.
+        This values is truncated to seconds under the hood.
+
+config APP_MQTT_MIN_YIELD_TIMEOUT
+    int "AWS IoT MQTT minimum yield timeout"
+    default 600
+    range 50 65535000
+    help
+        MQTT needs to block sample publishing task for a selected period
+        of time.
+        That time is dynamically computed depending on the state of the samples
+        queue. However, if there the timeout is too small (e.g. if there is
+        only one item left to be pushed to the queue before publishing)
+        incoming messages may be lost.
+        This value is in milliseconds.
+
+config APP_MQTT_MAX_YIELD_TIMEOUT
+    int "AWS IoT MQTT maximum yield timeout"
+    default 60000
+    range 100 65535000
+    help
+        See APP_MQTT_MIN_YIELD_TIMEOUT.
+        This value is in milliseconds.
+
+config APP_MQTT_TOPIC
+    string "AWS IoT MQTT topic"
+    default "sensors/samples"
+
+config APP_TLS_HANDSHAKE_TIMEOUT
+    int "TLS handshake timoeut"
+    default 5000
+    range 0 60000
+    help
+        TLS handshake timeout for when connection over MQTT in milliseconds.
+
+config APP_DEFAULT_PMS_SAFETY_DELAY
+    int "Default PMS safely delay"
+    default 60000
+    range 0 3600000
+    help
+        Safety delay in milliseconds for when operating conditions
+        are considered to be unsafe for the PMS.
+        This value may get updated later on over AWS IoT connection.
+
+config APP_DEFAULT_CONV_PERIOD
+    int "Default measurement conversion period"
+    default 60000
+    range 0 3600000
+    help
+        Measurement conversion trigger period in milliseconds.
+        This value may get updated later on over AWS IoT connection.
+
+config APP_DEFAULT_MAX_CONV_DELAY
+    int "Maximum measurement conversion trigger delay"
+    default 180000
+    range 0 86400000
+    help
+        If a conversion fails or unsafe operating conditions are detected
+        the measurement delay wil start increasing linearily
+        by `CONFIG_APP_DEFAULT_PMS_SAFETY_DELAY' on every conversion attempt.
+        The measurement delay is truncated to this value.
+        Measured in milliseconds.
+        This value may get updated later on over AWS IoT connection.
+
+config APP_PUBLISH_COUNT
+    int "Number of samples contained within one message"
+    default 40
+    range 1 1024
+    help
+        AWS IoT task will wait until `APP_PUBLISH_SAMPLES_COUNT' is collected
+        before publishing them to the cloud.
+
+config APP_SAMPLESQ_LENGTH
+    int "Number of samples to hold in the queue"
+    default 512
+    range 0 2048
+    help
+        Every sampled measurement from the sensors is pushed into a queue for
+        another task to pop and send to the cloud. If the number of samples
+        in the queue reached `APP_SAMPLESQ_LENGTH' then old samples will
+        be overwritten by new ones.
+
+config APP_NTP_SERVERNAME
+    string "NTP server name"
+    default "pool.ntp.org"
+    help
+        Network Time Protocol servername to synchronize time with.
+
+config APP_LATITUDE
+    int "Sensor location: latitude"
+    default 51067838
+
+config APP_LONGITUDE
+    int "Sensor location: longitude"
+    default 4499943
+            
+endmenu
+
