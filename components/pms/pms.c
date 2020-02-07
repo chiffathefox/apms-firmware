@@ -83,7 +83,7 @@ pms_init(struct pms *pms, uart_port_t port, enum pms_model model,
     uart_config.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
 
     ESP_ERROR_CHECK(uart_param_config(port, &uart_config));
-    ESP_ERROR_CHECK(uart_driver_install(port, PMS_RSP_BUF_LEN, 0, 0, NULL, 0));
+    ESP_ERROR_CHECK(uart_driver_install(port, PMS_RSP_BUF_LEN, 0, 0, NULL));
 
     startup_ticks = PMS_STARTUP_TICKS;
 

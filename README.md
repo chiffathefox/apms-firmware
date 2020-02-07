@@ -4,7 +4,7 @@ This is a firmware source code for the air pollution monitoring sensor. It's des
 
 # Building
 
-1. To build this project you need a fully operational xtensa toolchain, and a fully set up [ESP8266 RTOS SDK](https://github.com/espressif/ESP8266_RTOS_SDK). The SDK page describes the steps necessary to achieve that. Do not forget to create a python environment and install SDK requirements into it.
+1. To build this project you need a fully operational xtensa toolchain, and a fully set up [ESP8266 RTOS SDK](https://github.com/espressif/ESP8266_RTOS_SDK) v3.2. The SDK page describes the steps necessary to achieve that. Do not forget to create a python2 environment and install SDK requirements into it.
 2. Acquire Thing's public `certificate.pem.crt` and private `private.pem.key` certificates from AWS IoT Core Console and put them into `main/certs`.
 3. Adjust parameters using `make menuconfig`, if necessary.
 4. Once everything is set up it's just a matter of:

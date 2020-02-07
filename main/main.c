@@ -318,7 +318,6 @@ app_i2c_master_init(i2c_port_t port)
     conf.sda_pullup_en = 0;
     conf.scl_io_num = GPIO_NUM_5;
     conf.scl_pullup_en = 0;
-    conf.clk_stretch_tick = 300;
 
     err = i2c_driver_install(port, conf.mode);
 

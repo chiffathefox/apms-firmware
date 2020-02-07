@@ -106,7 +106,7 @@ config APP_DEFAULT_MAX_CONV_DELAY
 
 config APP_PUBLISH_COUNT
     int "Number of samples contained within one message"
-    default 40
+    default 5
     range 1 1024
     help
         AWS IoT task will wait until `APP_PUBLISH_SAMPLES_COUNT' is collected
@@ -114,7 +114,7 @@ config APP_PUBLISH_COUNT
 
 config APP_SAMPLESQ_LENGTH
     int "Number of samples to hold in the queue"
-    default 512
+    default 40
     range 0 2048
     help
         Every sampled measurement from the sensors is pushed into a queue for
